@@ -1,9 +1,11 @@
 var express = require('express');
 var ip = require('ip');
-var http = require('http');
+var natpmp = require('nat-upnp');
 var app = express();
 var server = require('http').Server(app);
 var io = require('socket.io').listen(server);
+var routerClient = connectToRouter();
+var PORT = 8081;
 
 var players = {};
 var star = {
@@ -70,12 +72,45 @@ io.on('connection', function (socket) {
   });
 });
 
-server.listen(8081, ip.address(), function () {
-  console.log(`Listening on ${ip.address()}:${server.address().port} locally`);
+server.listen(PORT, ip.address(), function () {
+  console.log(`Listening on ${ip.address()}:${PORT} locally`);
 
-  http.get({'host': 'api.ipify.org', 'port': 80, 'path': '/'}, function(resp) {
-    resp.on('data', function(ip) {
-      console.log(`Listening on ${ip} publicly`);
-    });
+  routerClient.portMapping({
+    description: 'test-forwarding',
+    protocol: 'tcp',
+    private: PORT,
+    public: 80,
+    ttl: 3600 * 8
+  }, function (err, res) {
+    if (err) throw err;
+    // console.log(res);
+  });
+
+  routerClient.externalIp(function (err, ip) {
+    if (err) throw err;
+    console.log(`Current external IP address: ${ip}`);
   });
 });
+
+process.on('SIGTERM', () => {
+  console.log('terminating (TERM)');
+  server.close();
+});
+
+process.on('SIGINT', () => {
+  console.log('terminating (INT)');
+  server.close();
+});
+
+// TODO: figure out how to force close active connections
+server.on('close', () => {
+  console.log('Removing port forwarding');
+  routerClient.portUnmapping({
+    public: 80
+  });
+});
+
+function connectToRouter() {
+  const client = natpmp.createClient();
+  return client;
+}
